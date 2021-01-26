@@ -15,7 +15,7 @@
 import argparse
 
 parser = argparse.ArgumentParser(
-    description='initiates the li1 hack')
+    description='Creates and obstruction in def and lef files.')
 
 parser.add_argument('--defFile', '-d',required=True,
                     help='Input DEF')
@@ -39,8 +39,8 @@ parser.add_argument('--sizeWidth', '-sw', required=True,
 parser.add_argument('--sizeHeight', '-sh', required=True,
                     help='the height of the macro')
 
-parser.add_argument('--dbunit', '-db', required=False,default=0,
-                    help='the height of the macro')
+parser.add_argument('--dbunit', '-db', required=False,default=1000,
+                    help='reflects the value of the data base unit')
 
 parser.add_argument('--layerNames', '-ln', nargs='+',required=True,
                     help='the name of the layers on which to place the macro')
@@ -100,13 +100,13 @@ lefFileOpener.close()
 printedString = "MACRO obs_"+str(obs)+"\n \
   CLASS BLOCK ;\n \
   FOREIGN obs_"+str(obs)+" ;\n \
-  ORIGIN "+str(float(X))+" "+str(float(Y))+" ;\n \
+  ORIGIN 0.000 0.000 ;\n \
   SIZE "+ str(float(W)) +" BY "+ str(float(H)) +" ;\n \
   OBS\n"
 
 for lname in layerNames:
     printedString+="        LAYER "+lname+" ;\n \
-            RECT "+str(float(X))+" "+str(float(Y))+" "+str(float(W)+float(X)) +" "+str(float(H)+float(Y)) +" ;\n"
+            RECT 0.000 0.000 "+str(float(W)) +" "+str(float(H)) +" ;\n"
 
 printedString+="   END\n \
 END obs_"+str(obs)

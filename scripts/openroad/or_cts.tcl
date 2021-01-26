@@ -24,16 +24,34 @@ if {[catch {read_def $::env(CURRENT_DEF)} errmsg]} {
     exit 1
 }
 
-read_verilog $::env(yosys_result_file_tag).v
+read_verilog $::env(CURRENT_NETLIST)
 read_sdc $::env(SCRIPTS_DIR)/base.sdc
 
-clock_tree_synthesis\
-    -max_slew $::env(SYNTH_MAX_TRAN)\
-    -max_cap $::env(CTS_MAX_CAP)\
-    -buf_list $::env(CTS_CLK_BUFFER_LIST)\
+set max_slew [expr {$::env(SYNTH_MAX_TRAN) * 1e-9}]; # must convert to seconds
+set max_cap [expr {$::env(CTS_MAX_CAP) * 1e-12}]; # must convert to farad
+
+puts "\[INFO\]: Configuring cts characterization..."
+configure_cts_characterization\
+    -max_slew $max_slew\
+    -max_cap $max_cap\
     -sqr_cap $::env(CTS_SQR_CAP)\
-    -sqr_res $::env(CTS_SQR_RES)\
-    -root_buf $::env(CTS_ROOT_BUFFER)
+    -sqr_res $::env(CTS_SQR_RES)
+
+puts "\[INFO]: Performing clock tree synthesis..."
+puts "\[INFO]: Looking for the following net(s): $::env(CLOCK_NET)"
+
+clock_tree_synthesis\
+    -buf_list $::env(CTS_CLK_BUFFER_LIST)\
+    -root_buf $::env(CTS_ROOT_BUFFER)\
+    -clk_nets $::env(CLOCK_NET)
 
 write_def $::env(SAVE_DEF)
-write_verilog $::env(yosys_result_file_tag)_cts.v
+
+set buffers "$::env(CTS_ROOT_BUFFER) $::env(CTS_CLK_BUFFER_LIST)" 
+set_placement_padding -masters $buffers -left $::env(CELL_PAD)
+puts "\[INFO\]: Legalizing..."
+detailed_placement
+write_def $::env(SAVE_DEF)
+if { [check_placement -verbose] } {
+	exit 1
+}

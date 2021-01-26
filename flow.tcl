@@ -1,4 +1,4 @@
-#!/usr/bin/tclsh8.5
+#!/usr/bin/tclsh
 # Copyright 2020 Efabless Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -20,13 +20,12 @@ lappend ::auto_path "$::env(OPENLANE_ROOT)/scripts/"
 package require openlane; # provides the utils as well
 
 proc run_non_interactive_mode {args} {
-	set args_copy $args
-	set options {\
-	    {-design required}\
-	    {-save_path optional}\
+	set options {
+		{-design required}
+		{-save_path optional}
 	}
 	set flags {-save}
-	parse_key_args "run_non_interactive_mode" args_copy arg_values $options flags_map $flags
+	parse_key_args "run_non_interactive_mode" args arg_values $options flags_map $flags -no_consume
 
 	prep {*}$args
 
@@ -34,58 +33,75 @@ proc run_non_interactive_mode {args} {
 	run_floorplan
 	run_placement
 	run_cts
-	gen_pdn
 	run_routing
 
-	run_magic_spice_export
-
-	if { $::env(DIODE_INSERTION_STRATEGY) == 2 } {
-	    run_magic_antenna_check; # produces a report of violators; extraction!
-	    heal_antenna_violators; # modifies the routed DEF
+	if { ($::env(DIODE_INSERTION_STRATEGY) == 2) || ($::env(DIODE_INSERTION_STRATEGY) == 5) } {
+		run_antenna_check
+		heal_antenna_violators; # modifies the routed DEF
 	}
+
+    if { $::env(LVS_INSERT_POWER_PINS) } {
+		write_powered_verilog
+		set_netlist $::env(lvs_result_file_tag).powered.v
+    }
 
 	run_magic
 
-	run_magic_drc
-	run_netgen
-	run_magic_antenna_check; # to verify the above and get a final report
+	run_magic_spice_export
 
-
-
-
-
-	#export_magic_view \
-		-def $::env(CURRENT_DEF) \
-		-output $::env(magic_result_file_tag).mag
 	if {  [info exists flags_map(-save) ] } {
-		if { [info exists arg_values(-save_path)] } {
-			save_views 	-lef_path $::env(magic_result_file_tag).lef \
-					-def_path $::env(tritonRoute_result_file_tag).def \
-					-gds_path $::env(magic_result_file_tag).gds \
-					-mag_path $::env(magic_result_file_tag).mag \
-					-save_path $arg_values(-save_path) \
-					-tag $::env(RUN_TAG)
-		} else  {
-			save_views 	-lef_path $::env(magic_result_file_tag).lef \
-					-def_path $::env(tritonRoute_result_file_tag).def \
-					-mag_path $::env(magic_result_file_tag).mag \
-					-gds_path $::env(magic_result_file_tag).gds \
-					-tag $::env(RUN_TAG)
-			}
+		if { ! [info exists arg_values(-save_path)] } {
+			set arg_values(-save_path) ""
+		}
+		save_views 	-lef_path $::env(magic_result_file_tag).lef \
+			-def_path $::env(tritonRoute_result_file_tag).def \
+			-gds_path $::env(magic_result_file_tag).gds \
+			-mag_path $::env(magic_result_file_tag).mag \
+			-maglef_path $::env(magic_result_file_tag).lef.mag \
+			-spice_path $::env(magic_result_file_tag).spice \
+			-verilog_path $::env(CURRENT_NETLIST) \
+			-save_path $arg_values(-save_path) \
+			-tag $::env(RUN_TAG)
 	}
+
+	# Physical verification
+
+	run_magic_drc
+
+	run_lvs; # requires run_magic_spice_export
+
+	run_antenna_check
+
+	run_lef_cvc
+
+	generate_final_summary_report
+
+	puts_success "Flow Completed Without Fatal Errors."
 }
 
 proc run_interactive_mode {args} {
+	set options {
+		{-design optional}
+	}
+	set flags {}
+	parse_key_args "run_interactive_mode" args arg_values $options flags_map $flags -no_consume
+
+	if { [info exists arg_values(-design)] } {
+		prep {*}$args
+	}
+
 	set ::env(TCLLIBPATH) $::auto_path
 	exec tclsh >&@stdout
 }
 
 proc run_magic_drc_batch {args} {
-	set options {{-magicrc optional} \
-			{-tech optional} \
-			{-report required} \
-			{-design required} \
-			{-gds required}}
+	set options {
+		{-magicrc optional}
+		{-tech optional}
+		{-report required}
+		{-design required}
+		{-gds required}
+	}
 	set flags {}
 	parse_key_args "run_magic_drc_batch" args arg_values $options flags_mag $flags
 	if { [info exists arg_values(-magicrc)] } {
@@ -103,58 +119,61 @@ proc run_magic_drc_batch {args} {
 			-noconsole \
 			-dnull \
 			-rcfile $magicrc \
-			$::env(OPENLANE_ROOT)/scripts/magic_drc_batch.tcl \
+			$::env(OPENLANE_ROOT)/scripts/magic/drc_batch.tcl \
 			</dev/null |& tee /dev/tty
 	} else {
 		exec magic \
 			-noconsole \
 			-dnull \
-			$::env(OPENLANE_ROOT)/scripts/magic_drc_batch.tcl \
+			$::env(OPENLANE_ROOT)/scripts/magic/drc_batch.tcl \
 			</dev/null |& /dev/tty
 	}
 }
 
 proc run_file {args} {
 	set ::env(TCLLIBPATH) $::auto_path
-	exec tclsh $args >&@stdout
+	exec tclsh {*}$args >&@stdout
 }
 
-set options {\
-    {-file optional}\
+set options {
+	{-file optional}
 }
 
-set flags {-interactive -it -drc}
+set flags {-interactive -it -drc -synth_explore}
 
-set argv_copy $argv
-parse_key_args "flow.tcl" argv arg_values $options flags_map $flags
+parse_key_args "flow.tcl" argv arg_values $options flags_map $flags -no_consume
 
 puts_info {
-      ___   ____   ___  ____   _       ____  ____     ___
-     /   \ |    \ /  _]|    \ | |     /    ||    \   /  _]
-    |     ||  o  )  [_ |  _  || |    |  o  ||  _  | /  [_
-    |  O  ||   _/    _]|  |  || |___ |     ||  |  ||    _]
-    |     ||  | |   [_ |  |  ||     ||  _  ||  |  ||   [_
-     \___/ |__| |_____||__|__||_____||__|__||__|__||_____|
+	___   ____   ___  ____   _       ____  ____     ___
+	/   \ |    \ /  _]|    \ | |     /    ||    \   /  _]
+	|     ||  o  )  [_ |  _  || |    |  o  ||  _  | /  [_
+	|  O  ||   _/    _]|  |  || |___ |     ||  |  ||    _]
+	|     ||  | |   [_ |  |  ||     ||  _  ||  |  ||   [_
+	\___/ |__| |_____||__|__||_____||__|__||__|__||_____|
 
 }
 if {[catch {exec git --git-dir $::env(OPENLANE_ROOT)/.git describe --tags} ::env(OPENLANE_VERSION)]} {
-    # if no tags yet
-    if {[catch {exec git --git-dir $::env(OPENLANE_ROOT)/.git log --pretty=format:'%h' -n 1} ::env(OPENLANE_VERSION)]} {
-	set ::env(OPENLANE_VERSION) "N/A"
-    }
+	# if no tags yet
+	if {[catch {exec git --git-dir $::env(OPENLANE_ROOT)/.git log --pretty=format:'%h' -n 1} ::env(OPENLANE_VERSION)]} {
+		set ::env(OPENLANE_VERSION) "N/A"
+	}
 }
 
 puts_info "Version: $::env(OPENLANE_VERSION)"
 
-if { [info exists flags_map(-interactive)] ||\
-    [info exists flags_map(-it)] } {
+if { [info exists flags_map(-interactive)] || [info exists flags_map(-it)] } {
+	puts_info "Running interactively"
 	if { [info exists arg_values(-file)] } {
-		run_file [file normalize $arg_values(-file)]
+		run_file [file normalize $arg_values(-file)] {*}$argv
 	} else {
-		run_interactive_mode "$argv_copy"
+		run_interactive_mode {*}$argv
 	}
 } elseif { [info exists flags_map(-drc)] } {
-	run_magic_drc_batch {*}$argv_copy
+	run_magic_drc_batch {*}$argv
+} elseif { [info exists flags_map(-synth_explore)] } {
+	prep {*}$argv
+	run_synth_exploration
 } else {
-	run_non_interactive_mode {*}$argv_copy
+	puts_info "Running non-interactively"
+	run_non_interactive_mode {*}$argv
 }

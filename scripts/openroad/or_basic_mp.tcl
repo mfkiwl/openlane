@@ -16,7 +16,9 @@ if {[catch {read_lef $::env(MERGED_LEF_UNPADDED)} errmsg]} {
     exit 1
 }
 
-read_liberty $::env(LIB_SYNTH)
+foreach lib $::env(LIB_SYNTH) {
+    read_liberty $lib
+}
 
 if {[catch {read_def $::env(CURRENT_DEF)} errmsg]} {
     puts stderr $errmsg
@@ -25,10 +27,10 @@ if {[catch {read_def $::env(CURRENT_DEF)} errmsg]} {
 
 set glb_cfg_file [open $::env(TMP_DIR)/glb.cfg w]
     puts $glb_cfg_file \
-"set ::HALO_WIDTH_V 100
-set ::HALO_WIDTH_H 100
-set ::CHANNEL_WIDTH_V 100
-set ::CHANNEL_WIDTH_H 100"
+"set ::HALO_WIDTH_V 0
+set ::HALO_WIDTH_H 0
+set ::CHANNEL_WIDTH_V 0
+set ::CHANNEL_WIDTH_H 0"
 close $glb_cfg_file
 
 macro_placement -global_config $::env(TMP_DIR)/glb.cfg
